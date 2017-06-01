@@ -120,3 +120,47 @@ class TestS3Meterer(TestCase):
             "s3://b1/k1", datetime(2017, 1, 1, 4, 30, 0)))
 
         return
+
+    @mock_s3
+    def test_bad_resource_names(self):
+        """
+        Create an S3 Meterer and ensure it refuses malformed resource names.
+        """
+        from meterer import S3Meterer
+        s3m = S3Meterer(FakeCache())
+
+        try:
+            s3m.allow_resource_access("/foo/bar")
+            self.fail("Expected ValueError")
+        except ValueError:
+            pass
+
+        try:
+            s3m.allow_resource_access("s3:///bar")
+            self.fail("Expected ValueError")
+        except ValueError:
+            pass
+
+        try:
+            s3m.allow_resource_access("s3://foo")
+            self.fail("Expected ValueError")
+        except ValueError:
+            pass
+
+        return
+
+    @mock_s3
+    def test_alt_session(self):
+        """
+        Create an S3 Meterer and ensure it uses an alternative Boto3 session
+        properly.
+        """
+        from meterer import S3Meterer
+        from boto3.session import Session
+
+        session = Session(region_name="us-west-2")
+
+        s3m = S3Meterer(FakeCache(), session)
+        self.create_key()
+        self.assertTrue(s3m.allow_resource_access("s3://b1/k1"))
+        return
