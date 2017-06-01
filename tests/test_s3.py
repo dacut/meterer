@@ -14,6 +14,12 @@ class TestS3Meterer(TestCase):
     """
     Test the S3Meterer.
     """
+    def create_key(self, bucket="b1", key="k1", size=40):
+        s3 = boto3.resource("s3")
+        s3.Bucket(bucket).create()
+        k1 = s3.Object(bucket, key)
+        k1.put(Body=(b"\0" * 40))
+        return
 
     @mock_s3
     def test_create(self):
@@ -31,26 +37,86 @@ class TestS3Meterer(TestCase):
         """
         from meterer import S3Meterer
         s3m = S3Meterer(FakeCache())
-        s3m.set_limits_for_pool("bucketname", hour=100.0)
+        s3m.set_limits_for_pool("b1", hour=100.0)
+        self.assertEquals(s3m.get_limits_for_pool("b1"), {"hour": 100.0})
+        self.assertEquals(
+            s3m.get_period_strs(datetime(2017, 1, 1, 0, 0, 0)),
+            {
+                "year": "2017",
+                "month": "2017-01",
+                "day": "2017-01-01",
+                "hour": "2017-01-01T00",
+                "week": "2016-W52"
+            })
+        self.create_key()
 
-        when1 = datetime(
-            year=2017, month=1, day=1, hour=0, minute=0, second=0)
-        when2 = datetime(
-            year=2017, month=1, day=1, hour=0, minute=59, second=59)
-        when3 = datetime(
-            year=2017, month=1, day=1, hour=1, minute=0, second=0)
+        # Access #1 at 00:00: hour=40, ok
+        self.assertTrue(s3m.allow_resource_access(
+            "s3://b1/k1", datetime(2017, 1, 1, 0, 0, 0)))
+        # Access #2 at 00:30: hour=80, ok
+        self.assertTrue(s3m.allow_resource_access(
+            "s3://b1/k1", datetime(2017, 1, 1, 0, 30, 0)))
+        # Access #3 at 00:59: hour=80+40, fail
+        self.assertFalse(s3m.allow_resource_access(
+            "s3://b1/k1", datetime(2017, 1, 1, 0, 59, 0)))
+        # Access #4 at 01:00: hour=40, ok
+        self.assertTrue(s3m.allow_resource_access(
+            "s3://b1/k1", datetime(2017, 1, 1, 1, 0, 0)))
 
-        s3 = boto3.resource("s3")
-        s3.Bucket("bucketname").create()
-        k1 = s3.Object("bucketname", "key1")
-        k1.put(Body=(b"\0" * 40))
+        return
 
-        self.assertTrue(
-            s3m.allow_resource_access("s3://bucketname/key1", when1))
-        self.assertTrue(
-            s3m.allow_resource_access("s3://bucketname/key1", when2))
-        self.assertFalse(
-            s3m.allow_resource_access("s3://bucketname/key1", when2))
-        self.assertTrue(
-            s3m.allow_resource_access("s3://bucketname/key1", when3))
+    @mock_s3
+    def test_daily_limit(self):
+        """
+        Create an S3 Meterer and ensure it refuses accesses in a daily window.
+        """
+        from meterer import S3Meterer
+        s3m = S3Meterer(FakeCache())
+        s3m.set_limits_for_pool("b1", hour=100.0, day=300.0)
+        self.assertEquals(
+            s3m.get_limits_for_pool("b1"),
+            {"hour": 100.0, "day": 300.0}
+        )
+        self.assertEquals(
+            s3m.get_period_strs(datetime(2017, 1, 1, 0, 0, 0)),
+            {
+                "year": "2017",
+                "month": "2017-01",
+                "day": "2017-01-01",
+                "hour": "2017-01-01T00",
+                "week": "2016-W52"
+            })
+        self.create_key()
+
+        # Access #1 at 00:00: hour=40, day=40, ok
+        self.assertTrue(s3m.allow_resource_access(
+            "s3://b1/k1", datetime(2017, 1, 1, 0, 0, 0)))
+        # Access #2 at 00:30: hour=80, day=80, ok
+        self.assertTrue(s3m.allow_resource_access(
+            "s3://b1/k1", datetime(2017, 1, 1, 0, 30, 0)))
+        # Access #3 at 00:59: hour=80+40, day=80+40, fail
+        self.assertFalse(s3m.allow_resource_access(
+            "s3://b1/k1", datetime(2017, 1, 1, 0, 59, 0)))
+        # Access #4 at 01:00: hour=40, day=120, ok
+        self.assertTrue(s3m.allow_resource_access(
+            "s3://b1/k1", datetime(2017, 1, 1, 1, 0, 0)))
+        # Access #5 at 01:30: hour=80, day=160, ok
+        self.assertTrue(s3m.allow_resource_access(
+            "s3://b1/k1", datetime(2017, 1, 1, 1, 30, 0)))
+        # Access #6 at 01:59: hour=80+40, day=160+40, fail
+        self.assertFalse(s3m.allow_resource_access(
+            "s3://b1/k1", datetime(2017, 1, 1, 1, 30, 0)))
+        # Access #4 at 02:00: hour=40, day=200, ok
+        self.assertTrue(s3m.allow_resource_access(
+            "s3://b1/k1", datetime(2017, 1, 1, 2, 0, 0)))
+        # Access #4 at 03:00: hour=40, day=240, ok
+        self.assertTrue(s3m.allow_resource_access(
+            "s3://b1/k1", datetime(2017, 1, 1, 3, 0, 0)))
+        # Access #5 at 04:00: hour=40, day=280, ok
+        self.assertTrue(s3m.allow_resource_access(
+            "s3://b1/k1", datetime(2017, 1, 1, 4, 0, 0)))
+        # Access #5 at 04:30: hour=40+40, day=280+40, fail
+        self.assertFalse(s3m.allow_resource_access(
+            "s3://b1/k1", datetime(2017, 1, 1, 4, 30, 0)))
+
         return

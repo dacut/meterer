@@ -4,7 +4,10 @@ Generic metering client.
 """
 import datetime
 from json import dumps as json_dumps, loads as json_loads
+from logging import getLogger
 from time import time
+
+log = getLogger("meterer.client")
 
 class Meterer(object):
     """
@@ -69,19 +72,35 @@ class Meterer(object):
             aggregate_size = self.cache.incrbyfloat(
                 "ATTEMPT:%s:%s" % (period_str, pool), resource_size)
             period_attempts[period] = aggregate_size
+            log.debug("allow_resource_access(%r): ATTEMPT:%s:%s=%s",
+                      resource_name, period_str, pool, aggregate_size)
+        del period_str
+
+        # A list of things we need to undo from Redis if we breach a limit.
+        undo_actions = []
 
         # Check for limit breaches.
-        for period, aggregate_size in period_attempts.items():
+        for period, period_str in period_strs.items():
             limit = limits.get(period)
-            if limit and aggregate_size > limit:
-                # We would breach the limit here.
+            key = "ALLOWED:%s:%s" % (period_str, pool)
+            result = self.cache.incrbyfloat(key, resource_size)
+            undo_actions.append((key, -resource_size))
+
+            log.debug("allow_resource_access(%r): ALLOWED:%s:%s=%s",
+                      resource_name, period_str, pool, result)
+
+            if limit and result > limit:
+                log.debug("allow_resource_access(%r): Limit %s would be "
+                          "breached: limit=%s, result=%s", resource_name,
+                          period, limit, result)
+
+                for key, incr in undo_actions:
+                    self.cache.incrbyfloat(key, incr)
+
                 return False
 
-        # No limits breached. Record the allowance.
-        for period, period_str in period_strs.items():
-            self.cache.incrbyfloat(
-                "ALLOWED:%s:%s" % (period_str, pool), resource_size)
-
+        log.debug("allow_resource_access(%r): No limits breached; allowed",
+                  resource_name)
         return True
 
     def pool_for_resource(self, resource_name): # pylint: disable=R0201
