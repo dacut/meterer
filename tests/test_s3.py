@@ -119,6 +119,11 @@ class TestS3Meterer(TestCase):
         self.assertFalse(s3m.allow_resource_access(
             "s3://b1/k1", datetime(2017, 1, 1, 4, 30, 0)))
 
+        # Remove the daily limit.
+        s3m.set_limits_for_pool("b1", day=None)
+        self.assertTrue(s3m.allow_resource_access(
+            "s3://b1/k1", datetime(2017, 1, 1, 4, 40, 0)))
+
         return
 
     @mock_s3
@@ -163,4 +168,60 @@ class TestS3Meterer(TestCase):
         s3m = S3Meterer(FakeCache(), session)
         self.create_key()
         self.assertTrue(s3m.allow_resource_access("s3://b1/k1"))
+        return
+
+    @mock_s3
+    def test_bad_limits(self):
+        """
+        Create an S3 Meterer and ensure it refuses bad limits.
+        """
+        from meterer import S3Meterer
+        s3m = S3Meterer(FakeCache())
+
+        try:
+            s3m.set_limits_for_pool("b1", day="hello")
+            self.fail("Expected TypeError")
+        except TypeError:
+            pass
+
+        try:
+            s3m.set_limits_for_pool("b1", month=[1, 2, 3])
+            self.fail("Expected TypeError")
+        except TypeError:
+            pass
+
+        try:
+            s3m.set_limits_for_pool("b1", yesterday=1)
+            self.fail("Expected ValueError")
+        except ValueError:
+            pass
+
+        return
+
+    @mock_s3
+    def test_unset_limits(self):
+        """
+        Create an S3 Meterer and ensure unset limits are empty dicts.
+        """
+        from meterer import S3Meterer
+        s3m = S3Meterer(FakeCache())
+        self.assertEquals(s3m.get_limits_for_pool("foo"), {})
+        return
+
+class TestMeterer(TestCase):
+    def test_abstract_methods(self):
+        """
+        Create a Meterer and ensure abstract(-ish) methods return appropriate
+        values or raise errors.
+        """
+        from meterer import Meterer
+        m = Meterer(FakeCache())
+        self.assertEquals(m.pool_for_resource("x"), "x")
+
+        try:
+            m.get_actual_resource_size("x")
+            self.fail("Expected NotImplementedError")
+        except NotImplementedError:
+            pass
+
         return

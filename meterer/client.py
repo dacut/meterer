@@ -165,11 +165,9 @@ class Meterer(object):
                 continue
 
             limit = kw.pop(time_period)
-            if limit is None:
-                continue
-
-            if not isinstance(limit, (float, int)):
-                raise TypeError("%s must be a float or int", time_period)
+            if limit is not None and not isinstance(limit, (float, int)):
+                raise TypeError("%s must be a float or int or None",
+                                time_period)
             pool_limits[time_period] = limit
 
         if kw:
