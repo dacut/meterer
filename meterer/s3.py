@@ -12,14 +12,18 @@ class S3Meterer(Meterer):
     """
     s3_url_prefix = "s3://"
 
-    def __init__(self, cache, boto_session=None):
+    def __init__(self, cache, boto_session=None, cloudwatch_namespace=None):
         """
-        S3Meterer(cache, boto_session=None) -> S3Meterer
+        S3Meterer(cache, boto_session=None, cloudwatch_namespace=None)
+          -> S3Meterer
 
         Create a new S3Meterer, using the specified cache for recording access
         patterns and retrieving limits. If boto_session is not None, it is
         used to generate new S3 Boto clients. Otherwise, the default Boto3
         session is used.
+
+        If cloudwatch_namespace is not None, CloudWatch metrics will be emitted
+        to the specified namespace.
         """
         super(S3Meterer, self).__init__(cache)
         if boto_session is None:
@@ -27,6 +31,8 @@ class S3Meterer(Meterer):
             self.boto_session = boto3
         else:
             self.boto_session = boto_session
+
+        self.cloudwatch_namespace = cloudwatch_namespace
 
         return
 
@@ -70,3 +76,111 @@ class S3Meterer(Meterer):
             return (bucket, key)
         except ValueError:
             raise ValueError("No key specified in URL %r" % resource_name)
+
+
+    def log_attempt(self, pool, resource_name, resource_size):
+        """
+        Log an access attempt.
+        """
+        if self.cloudwatch_namespace:
+            cw = self.boto_session.client("cloudwatch")
+            cw.put_metric_data(
+                Namespace=self.cloudwatch_namespace,
+                MetricData={
+                    "MetricName": "AccessAttempt",
+                    "Dimensions": [
+                        {
+                            "Name": "Bucket",
+                            "Value": pool,
+                        }
+                    ],
+                    "Value": resource_size,
+                    "Unit": "byte",
+                }
+            )
+
+        return
+
+    def log_attempt_hwm(self, pool, resource_name, period, period_str, aggregate_size):
+        """
+        Log the access attempt high water mark for a given time period.
+        """
+        if self.cloudwatch_namespace:
+            cw = self.boto_session.client("cloudwatch")
+            cw.put_metric_data(
+                Namespace=self.cloudwatch_namespace,
+                MetricData={
+                    "MetricName": "AccessAttemptHWM",
+                    "Dimensions": [
+                        {
+                            "Name": "Bucket",
+                            "Value": pool,
+                        },
+                        {
+                            "Name": "Period",
+                            "Value": period,
+                        },
+                        {
+                            "Name": "PeriodStamp",
+                            "Value": period_str,
+                        }
+                    ],
+                    "Value": aggregate_size,
+                    "Unit": "byte",
+                }
+            )
+
+    def log_allowance(self, pool, resource_name, resource_size):
+        """
+        Log an access allowance.
+        """
+        if self.cloudwatch_namespace:
+            cw = self.boto_session.client("cloudwatch")
+            cw.put_metric_data(
+                Namespace=self.cloudwatch_namespace,
+                MetricData={
+                    "MetricName": "AccessAllowance",
+                    "Dimensions": [
+                        {
+                            "Name": "Bucket",
+                            "Value": pool,
+                        }
+                    ],
+                    "Value": resource_size,
+                    "Unit": "byte",
+                }
+            )
+
+        return
+
+    def log_allowance_hwm(self, pool, resource_name, period, period_str, aggregate_size):
+        """
+        Log the access allowance high water mark for a given time period. The
+        default implementation is a no-op.
+        """
+        if self.cloudwatch_namespace:
+            cw = self.boto_session.client("cloudwatch")
+            cw.put_metric_data(
+                Namespace=self.cloudwatch_namespace,
+                MetricData={
+                    "MetricName": "AccessAllowanceHWM",
+                    "Dimensions": [
+                        {
+                            "Name": "Bucket",
+                            "Value": pool,
+                        },
+                        {
+                            "Name": "Period",
+                            "Value": period,
+                        },
+                        {
+                            "Name": "PeriodStamp",
+                            "Value": period_str,
+                        }
+                    ],
+                    "Value": aggregate_size,
+                    "Unit": "byte",
+                }
+            )
+
+        return
