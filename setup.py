@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name="Meterer",
-    version="0.1.0",
+    version="0.2.0",
     packages=["meterer"],
     setup_requires=["nose>=1.0"],
     install_requires=["boto3", "redis"],
