@@ -65,24 +65,17 @@ class Meterer(object):
 
         resource_size = self.resource_size(resource_name)
 
-        self.log_attempt(pool, resource_name, resource_size)
-
         # Record the access attempt.
         for period, period_str in period_strs.items():
             aggregate_size = self.cache.incrbyfloat(
                 "ATTEMPT:%s:%s" % (period_str, pool), resource_size)
             log.debug("allow_resource_access(%r): ATTEMPT:%s:%s=%s",
                       resource_name, period_str, pool, aggregate_size)
-            self.log_attempt_hwm(
-                pool, resource_name, period, period_str, aggregate_size)
 
         del period_str
 
         # A list of things we need to undo from Redis if we breach a limit.
         undo_actions = []
-
-        # A list of things we need to log if all limits are met.
-        log_actions = []
 
         # Check for limit breaches.
         for period, period_str in period_strs.items():
@@ -90,8 +83,6 @@ class Meterer(object):
             key = "ALLOWED:%s:%s" % (period_str, pool)
             result = self.cache.incrbyfloat(key, resource_size)
             undo_actions.append((key, -resource_size))
-            log_actions.append((period, period_str, result))
-
             log.debug("allow_resource_access(%r): ALLOWED:%s:%s=%s",
                       resource_name, period_str, pool, result)
 
@@ -104,11 +95,6 @@ class Meterer(object):
                     self.cache.incrbyfloat(key, incr)
 
                 return False
-
-        self.log_allowance(pool, resource_name, resource_size)
-        for period, period_str, aggregate_size in log_actions:
-            self.log_allowance_hwm(pool, resource_name, period, period_str,
-                                   aggregate_size)
 
         log.debug("allow_resource_access(%r): No limits breached; allowed",
                   resource_name)
@@ -255,29 +241,3 @@ class Meterer(object):
             "hour": hour_str,
             "week": week_str,
         }
-
-    def log_attempt(self, pool, resource_name, resource_size):
-        """
-        Log an access attempt. The default implementation is a no-op.
-        """
-        return
-
-    def log_attempt_hwm(self, pool, resource_name, period, period_str, aggregate_size):
-        """
-        Log the access attempt high water mark for a given time period. The
-        default implementation is a no-op.
-        """
-        return
-
-    def log_allowance(self, pool, resource_name, resource_size):
-        """
-        Log an access allowance. The default implementation is a no-op.
-        """
-        return
-
-    def log_allowance_hwm(self, pool, resource_name, period, period_str, aggregate_size):
-        """
-        Log the access allowance high water mark for a given time period. The
-        default implementation is a no-op.
-        """
-        return
